@@ -8,6 +8,7 @@ import android.media.MediaFormat;
 import android.media.MediaMuxer;
 import android.os.Build;
 import android.os.Environment;
+import android.os.Handler;
 import android.support.annotation.NonNull;
 import android.support.v4.app.ActivityCompat;
 import android.support.v7.app.AppCompatActivity;
@@ -20,39 +21,42 @@ import android.widget.Toast;
 import com.aryan.dhankar.muxlibrary.Mp4ParserAudioMuxer;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.util.HashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+import butterknife.ButterKnife;
+import butterknife.OnClick;
 
 public class MainActivity extends AppCompatActivity {
+
+
     boolean result;
+    private Handler handler;
     Button go;
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+        ButterKnife.bind(this);
         go=(Button)findViewById(R.id.go);
         go.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
 
-                String a  = Environment.getExternalStorageDirectory().getAbsolutePath() + "/Download";
-                //String audiopath = a + "/"+"audio1.pcm";
-                String audiopath = a + "/"+"음성 013.m4a";
-                String videopath = a+ "/"+"video.mp4";
-
-
-//                String root = Environment.getExternalStorageDirectory().getPath();
-//                String audiopath = root + "/"+"Downloads/audio";
-//                String videopath = root+ "/"+"Downloads/video.mp4";
+                String path  = Environment.getExternalStorageDirectory().getAbsolutePath() + "/Download";
+                String audiopath = path + "/"+"음성 013.m4a";
+                String videopath = path+ "/"+"video.mp4";
 
                 Mp4ParserAudioMuxer muxer=new Mp4ParserAudioMuxer();
                 boolean isGrantStorage = grantExternalStoragePermission();
                 if(isGrantStorage){
-                    //result=muxer.mux(videopath,audiopath,Environment.getExternalStorageDirectory().getPath()+"/out.mp4");
-                    result=muxer.mux(videopath,audiopath,a+"/out.mp4");
+                    result=muxer.mux(videopath,audiopath,path+"/out.mp4");
                 }
-          //boolean result=muxer.mux(videopath,audiopath,Environment.getExternalStorageDirectory().getPath()+"/out.mp4");
      if (result==true){
          Toast.makeText(getApplicationContext(), "Muxing completed", Toast.LENGTH_SHORT).show();
      }else {
@@ -115,67 +119,62 @@ public class MainActivity extends AppCompatActivity {
     }
 
 
-    private void convertAudio(String filename) throws IOException {
+    @OnClick (R.id.pcm_encoder) void PcmEncoder(View v){
+        Toast.makeText(this,"Transform Start",Toast.LENGTH_SHORT).show();
+        String output_path = Environment.getExternalStorageDirectory().getAbsolutePath() + "/Download/out.m4a";
+        encodeSingleFile(output_path);
 
-        String outputpath =Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC).getPath()+"/converted.m4a";
-// Set up MediaExtractor to read from the source.
-
-        MediaExtractor extractor = new MediaExtractor();
-        extractor.setDataSource(filename);
-
-
-        int trackCount = extractor.getTrackCount();
-
-// Set up MediaMuxer for the destination.
-        MediaMuxer muxer;
-        muxer = new MediaMuxer(outputpath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
-// Set up the tracks.
-        HashMap<Integer, Integer> indexMap = new HashMap<Integer, Integer>(trackCount);
-        for (int i = 0; i < trackCount; i++) {
-            extractor.selectTrack(i);
-            MediaFormat format = extractor.getTrackFormat(i);
-            format.setString(MediaFormat.KEY_MIME, MediaFormat.MIMETYPE_AUDIO_AMR_NB);
-
-            int dstIndex = muxer.addTrack(format);
-            indexMap.put(i, dstIndex);
-        }
-// Copy the samples from MediaExtractor to MediaMuxer.
-        boolean sawEOS = false;
-        int bufferSize = 32000;
-        int frameCount = 0;
-        int offset = 100;
-        ByteBuffer dstBuf = ByteBuffer.allocate(bufferSize);
-        MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
-/* if (degrees >= 0) {
-    muxer.setOrientationHint(degrees);
-}*/
-// Test setLocation out of bound cases
-
-        muxer.start();
-        while (!sawEOS) {
-            bufferInfo.offset = offset;
-            bufferInfo.size = extractor.readSampleData(dstBuf, offset);
-            if (bufferInfo.size < 0) {
-
-                sawEOS = true;
-                bufferInfo.size = 0;
-            } else {
-                bufferInfo.presentationTimeUs = extractor.getSampleTime();
-                bufferInfo.flags = extractor.getSampleFlags();
-                int trackIndex = extractor.getSampleTrackIndex();
-                muxer.writeSampleData(indexMap.get(trackIndex), dstBuf,
-                        bufferInfo);
-                extractor.advance();
-                frameCount++;
-
-            }
-        }
-        muxer.stop();
-        muxer.release();
-
-        return;
+//        try {
+//            File tmpFile = File.createTempFile("single_" + System.currentTimeMillis(), ".m4a", getExternalCacheDir());
+//            encodeSingleFile(tmpFile.getAbsolutePath());
+//        } catch (IOException e) {
+//            Log.e("HAN_", "Exception while creating tmp file", e);
+//        }
     }
 
+    private void encodeSingleFile(final String outputPath) {
+        ExecutorService executorService = Executors.newSingleThreadExecutor();
+        executorService.submit(encodeTask(1, outputPath));
+    }
+
+    private void encodeMultipleFiles(final String outputPath) {
+        ExecutorService executorService = Executors.newSingleThreadExecutor();
+        executorService.submit(encodeTask(10, outputPath));
+    }
+
+    private Runnable encodeTask(final int numFiles, final String outputPath) {
+        return new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    final PCMEncoder pcmEncoder = new PCMEncoder(48000, 48000, 1);
+                    pcmEncoder.setOutputPath(outputPath);
+                    pcmEncoder.prepare();
+                    for (int i = 0; i < numFiles; i++) {
+                        //Log.d(TAG, "Encoding: " + i);
+                        String path  = Environment.getExternalStorageDirectory().getAbsolutePath() + "/Download";
+                        String audiopath = path + "/"+"audio1.pcm";
+
+//                        InputStream inputStream = getAssets().open("test.wav");
+//                        inputStream.skip(44);
+//                        pcmEncoder.encode(inputStream, 16000);
+
+                        FileInputStream fileInputStream = new FileInputStream(audiopath);
+                        pcmEncoder.encode(fileInputStream, 48000);
+                    }
+                    pcmEncoder.stop();
+                    handler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            Toast.makeText(getApplicationContext(), "Encoded file to: " + outputPath, Toast.LENGTH_LONG).show();
+                        }
+                    });
+                } catch (IOException e) {
+                    Log.e("HAN_", "Cannot create FileInputStream", e);
+                }
+            }
+        };
+    }
 
 
 }
